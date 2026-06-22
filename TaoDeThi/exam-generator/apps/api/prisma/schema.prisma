@@ -1,0 +1,451 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  ADMIN
+  TEACHER
+  PARENT
+  STUDENT
+}
+
+enum QuestionType {
+  TRAC_NGHIEM
+  TU_LUAN
+}
+
+enum Difficulty {
+  NHAN_BIET
+  THONG_HIEU
+  VAN_DUNG
+}
+
+enum ExamCategory {
+  CO_BAN
+  NANG_CAO
+}
+
+enum ExamFormat {
+  TRAC_NGHIEM
+  TU_LUAN
+  KET_HOP
+}
+
+enum ScanStatus {
+  PENDING
+  PROCESSED
+  NEEDS_REVIEW
+}
+
+// --- NEW ENUMS ---
+enum ExamPeriod {
+  GIUA_KI_1
+  CUOI_KI_1
+  GIUA_KI_2
+  CUOI_KI_2
+  CA_NAM
+}
+
+enum ExamScopeType {
+  LESSON
+  PERIOD
+}
+
+enum EnrollmentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum MaterialType {
+  SLIDE_PPT
+  VIDEO
+  DOCUMENT
+}
+
+enum MaterialAccessType {
+  FREE
+  PAID
+}
+
+enum InvitationTargetRole {
+  PARENT
+  STUDENT
+}
+
+// --- MODELS ---
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole
+  phone        String?
+  createdAt    DateTime @default(now())
+
+  classrooms          Classroom[]         @relation("TeacherClassrooms")
+  parentStudents      ParentStudent[]
+  questions           Question[]
+  exams               Exam[]
+  studentProfile      Student?            @relation("StudentUser")
+  enrollmentRequests  EnrollmentRequest[]
+  learningMaterials   LearningMaterial[]
+  materialPurchases   MaterialPurchase[]
+  createdInvitations  InvitationCode[]    @relation("InvitationCreator")
+  usedInvitations     InvitationCode[]    @relation("InvitationUser")
+  collectedExams      CollectedExam[]
+  reviewedEnrollments EnrollmentRequest[] @relation("ReviewedEnrollments")
+}
+
+model Student {
+  id                 String    @id @default(uuid())
+  fullName           String
+  dob                DateTime?
+  gradeId            String
+  grade              Grade     @relation(fields: [gradeId], references: [id])
+  createdByTeacherId String
+  userId             String?   @unique
+
+  user               User?               @relation("StudentUser", fields: [userId], references: [id])
+  parentStudents     ParentStudent[]
+  classroomStudents  ClassroomStudent[]
+  examResults        ExamResult[]
+  enrollmentRequests EnrollmentRequest[]
+  invitationCodes    InvitationCode[]
+}
+
+model ParentStudent {
+  id           String  @id @default(uuid())
+  parentUserId String
+  studentId    String
+  relationship String? // cha/mẹ/người giám hộ
+  isOwner      Boolean @default(false)
+
+  parent  User    @relation(fields: [parentUserId], references: [id])
+  student Student @relation(fields: [studentId], references: [id])
+
+  @@unique([parentUserId, studentId])
+}
+
+model Classroom {
+  id          String  @id @default(uuid())
+  teacherId   String
+  name        String
+  subjectId   String
+  gradeId     String
+  description String?
+
+  teacher            User                @relation("TeacherClassrooms", fields: [teacherId], references: [id])
+  subject            Subject             @relation(fields: [subjectId], references: [id])
+  grade              Grade               @relation(fields: [gradeId], references: [id])
+  classroomStudents  ClassroomStudent[]
+  schedules          Schedule[]
+  enrollmentRequests EnrollmentRequest[]
+}
+
+model ClassroomStudent {
+  id          String   @id @default(uuid())
+  classroomId String
+  studentId   String
+  joinedAt    DateTime @default(now())
+
+  classroom Classroom @relation(fields: [classroomId], references: [id])
+  student   Student   @relation(fields: [studentId], references: [id])
+
+  @@unique([classroomId, studentId])
+}
+
+model Subject {
+  id   String @id @default(uuid())
+  name String // Toán, Tiếng Việt
+
+  classrooms        Classroom[]
+  topics            Topic[]
+  questions         Question[]
+  exams             Exam[]
+  lessons           Lesson[]
+  learningMaterials LearningMaterial[]
+  collectedExams    CollectedExam[]
+}
+
+model Grade {
+  id    String @id @default(uuid())
+  name  String // Lớp 1...Lớp 5
+  level Int // 1-5
+
+  students          Student[]
+  classrooms        Classroom[]
+  topics            Topic[]
+  questions         Question[]
+  exams             Exam[]
+  lessons           Lesson[]
+  learningMaterials LearningMaterial[]
+  collectedExams    CollectedExam[]
+}
+
+model Topic {
+  id        String @id @default(uuid())
+  subjectId String
+  gradeId   String
+  name      String // VD: "Phép cộng có nhớ", "Tập đọc - Chính tả"
+
+  subject   Subject    @relation(fields: [subjectId], references: [id])
+  grade     Grade      @relation(fields: [gradeId], references: [id])
+  questions Question[]
+  lessons   Lesson[]
+}
+
+model Lesson {
+  id          String   @id @default(uuid())
+  subjectId   String
+  gradeId     String
+  topicId     String?
+  name        String
+  orderNo     Int
+  description String?
+  createdAt   DateTime @default(now())
+
+  subject     Subject      @relation(fields: [subjectId], references: [id])
+  grade       Grade        @relation(fields: [gradeId], references: [id])
+  topic       Topic?       @relation(fields: [topicId], references: [id])
+  questions   Question[]
+  examLessons ExamLesson[]
+}
+
+model Question {
+  id           String       @id @default(uuid())
+  topicId      String?
+  gradeId      String
+  subjectId    String
+  type         QuestionType
+  difficulty   Difficulty
+  examCategory ExamCategory
+  content      String // hỗ trợ HTML/markdown + ảnh minh họa
+  answerText   String? // đáp án mẫu/hướng dẫn chấm cho tự luận
+  score        Decimal      @default(1.0)
+  createdById  String
+  lessonId     String?
+
+  topic         Topic?               @relation(fields: [topicId], references: [id])
+  grade         Grade                @relation(fields: [gradeId], references: [id])
+  subject       Subject              @relation(fields: [subjectId], references: [id])
+  createdBy     User                 @relation(fields: [createdById], references: [id])
+  lesson        Lesson?              @relation(fields: [lessonId], references: [id])
+  options       QuestionOption[]
+  examQuestions ExamQuestion[]
+  examPeriods   QuestionExamPeriod[]
+}
+
+model QuestionExamPeriod {
+  id         String     @id @default(uuid())
+  questionId String
+  period     ExamPeriod
+
+  question Question @relation(fields: [questionId], references: [id])
+
+  @@unique([questionId, period])
+}
+
+model QuestionOption {
+  id         String  @id @default(uuid())
+  questionId String
+  label      String // A/B/C/D
+  content    String
+  isCorrect  Boolean @default(false)
+
+  question Question @relation(fields: [questionId], references: [id])
+}
+
+model Exam {
+  id              String        @id @default(uuid())
+  teacherId       String
+  title           String
+  subjectId       String
+  gradeId         String
+  examCategory    ExamCategory
+  examFormat      ExamFormat
+  totalScore      Decimal
+  durationMinutes Int
+  scopeType       ExamScopeType @default(PERIOD)
+  examPeriod      ExamPeriod?
+  createdAt       DateTime      @default(now())
+
+  teacher       User           @relation(fields: [teacherId], references: [id])
+  subject       Subject        @relation(fields: [subjectId], references: [id])
+  grade         Grade          @relation(fields: [gradeId], references: [id])
+  examQuestions ExamQuestion[]
+  examCodes     ExamCode[]
+  examLessons   ExamLesson[]
+}
+
+model ExamLesson {
+  id       String @id @default(uuid())
+  examId   String
+  lessonId String
+
+  exam   Exam   @relation(fields: [examId], references: [id])
+  lesson Lesson @relation(fields: [lessonId], references: [id])
+
+  @@unique([examId, lessonId])
+}
+
+model ExamQuestion {
+  id            String   @id @default(uuid())
+  examId        String
+  questionId    String
+  orderNo       Int
+  scoreOverride Decimal?
+
+  exam     Exam     @relation(fields: [examId], references: [id])
+  question Question @relation(fields: [questionId], references: [id])
+}
+
+model ExamCode {
+  id        String  @id @default(uuid())
+  examId    String
+  code      String  @unique // VD: "101A"
+  qrPayload String?
+  studentId String? // có thể in trước, gán học sinh sau
+  pdfPath   String?
+
+  exam        Exam         @relation(fields: [examId], references: [id])
+  examResults ExamResult[]
+}
+
+model ExamResult {
+  id            String     @id @default(uuid())
+  examCodeId    String
+  studentId     String?
+  totalScore    Decimal?
+  correctCount  Int?
+  wrongCount    Int?
+  blankCount    Int?
+  gradedAt      DateTime?
+  scanImagePath String?
+  status        ScanStatus @default(PENDING)
+  isMockExam    Boolean    @default(false)
+
+  examCode ExamCode           @relation(fields: [examCodeId], references: [id])
+  student  Student?           @relation(fields: [studentId], references: [id])
+  details  ExamResultDetail[]
+}
+
+model ExamResultDetail {
+  id                  String   @id @default(uuid())
+  examResultId        String
+  examQuestionId      String
+  selectedOptionLabel String?
+  isCorrect           Boolean?
+  scoreObtained       Decimal?
+
+  examResult ExamResult @relation(fields: [examResultId], references: [id])
+}
+
+model Schedule {
+  id           String    @id @default(uuid())
+  classroomId  String
+  dayOfWeek    Int? // 0-6 nếu lặp lại hàng tuần
+  specificDate DateTime? // hoặc ngày cụ thể (học bù, học thêm)
+  startTime    String
+  endTime      String
+  location     String?
+  note         String?
+
+  classroom Classroom @relation(fields: [classroomId], references: [id])
+}
+
+model EnrollmentRequest {
+  id           String           @id @default(uuid())
+  parentUserId String
+  studentId    String
+  classroomId  String
+  status       EnrollmentStatus @default(PENDING)
+  note         String?
+  createdAt    DateTime         @default(now())
+  reviewedAt   DateTime?
+  reviewedById String?
+
+  parent    User      @relation(fields: [parentUserId], references: [id])
+  student   Student   @relation(fields: [studentId], references: [id])
+  classroom Classroom @relation(fields: [classroomId], references: [id])
+  reviewer  User?     @relation("ReviewedEnrollments", fields: [reviewedById], references: [id])
+}
+
+model Setting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model LearningMaterial {
+  id           String             @id @default(uuid())
+  teacherId    String
+  title        String
+  description  String?
+  type         MaterialType
+  subjectId    String
+  gradeId      String
+  fileUrl      String
+  thumbnailUrl String?
+  accessType   MaterialAccessType @default(FREE)
+  price        Decimal?
+  createdAt    DateTime           @default(now())
+
+  teacher   User               @relation(fields: [teacherId], references: [id])
+  subject   Subject            @relation(fields: [subjectId], references: [id])
+  grade     Grade              @relation(fields: [gradeId], references: [id])
+  purchases MaterialPurchase[]
+}
+
+model MaterialPurchase {
+  id           String   @id @default(uuid())
+  materialId   String
+  parentUserId String
+  purchasedAt  DateTime @default(now())
+  pricePaid    Decimal?
+
+  material LearningMaterial @relation(fields: [materialId], references: [id])
+  parent   User             @relation(fields: [parentUserId], references: [id])
+
+  @@unique([materialId, parentUserId])
+}
+
+model InvitationCode {
+  id           String               @id @default(uuid())
+  code         String               @unique
+  studentId    String
+  targetRole   InvitationTargetRole
+  createdById  String
+  isUsed       Boolean              @default(false)
+  usedByUserId String?
+  expiresAt    DateTime?
+  createdAt    DateTime             @default(now())
+
+  student    Student @relation(fields: [studentId], references: [id])
+  createdBy  User    @relation("InvitationCreator", fields: [createdById], references: [id])
+  usedByUser User?   @relation("InvitationUser", fields: [usedByUserId], references: [id])
+}
+
+model CollectedExam {
+  id        String   @id @default(uuid())
+  teacherId String
+  title     String
+  subjectId String?
+  gradeId   String?
+  fileUrl   String
+  note      String?
+  createdAt DateTime @default(now())
+
+  teacher User     @relation(fields: [teacherId], references: [id])
+  subject Subject? @relation(fields: [subjectId], references: [id])
+  grade   Grade?   @relation(fields: [gradeId], references: [id])
+}
