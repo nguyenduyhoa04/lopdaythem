@@ -13,6 +13,17 @@ export class LessonsService {
     });
   }
 
+  async uploadResource(id: string, resourceUrl: string, resourceName: string) {
+    await this.findOne(id);
+    return this.prisma.lesson.update({
+      where: { id },
+      data: {
+        resourceUrl,
+        resourceName,
+      },
+    });
+  }
+
   async findAll(subjectId?: string, gradeId?: string) {
     return this.prisma.lesson.findMany({
       where: {

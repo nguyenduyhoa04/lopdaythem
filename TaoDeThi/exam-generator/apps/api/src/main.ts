@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import * as express from 'express';
 import * as path from 'path';
+import * as fs from 'fs';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -10,11 +11,30 @@ async function bootstrap() {
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
   // Serve uploaded files from a public uploads folder
-  const uploadsPath = path.join(process.cwd(), 'apps', 'api', 'public', 'uploads');
+  // Handle both cwd from monorepo root and from workspace root (turbo)
+  let uploadsPath = path.join(
+    process.cwd(),
+    'apps',
+    'api',
+    'public',
+    'uploads',
+  );
+  if (!fs.existsSync(uploadsPath)) {
+    const altPath = path.join(process.cwd(), 'public', 'uploads');
+    if (fs.existsSync(altPath)) {
+      uploadsPath = altPath;
+    } else {
+      // Create the directory if it doesn't exist
+      fs.mkdirSync(uploadsPath, { recursive: true });
+    }
+  }
+  console.log('[INFO] Uploads directory:', uploadsPath);
   app.use('/uploads', express.static(uploadsPath));
 
   app.enableCors();
-  await app.listen(process.env.PORT ?? 3000);
+  const port = process.env.PORT ?? 3000;
+  await app.listen(port);
+  console.log(`[INFO] Server running on port ${port}`);
 }
 
 bootstrap();

@@ -8,6 +8,7 @@ import {
   UseGuards,
   UploadedFile,
   UseInterceptors,
+  Delete,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { SettingsService } from './settings.service';
@@ -16,7 +17,23 @@ import { diskStorage } from 'multer';
 import * as path from 'path';
 import * as fs from 'fs';
 import { extname } from 'path';
-import { Delete } from '@nestjs/common';
+
+// Resolve the uploads directory once — works whether cwd is the monorepo root
+// or the apps/api workspace (turbo runs from the workspace root).
+function getUploadsDir(): string {
+  const cwd = process.cwd();
+  let uploadsPath = path.join(cwd, 'apps', 'api', 'public', 'uploads');
+  if (!fs.existsSync(uploadsPath)) {
+    const altPath = path.join(cwd, 'public', 'uploads');
+    if (fs.existsSync(altPath)) {
+      uploadsPath = altPath;
+    } else {
+      // Return the expected path anyway; multer will create it
+      uploadsPath = path.join(cwd, 'apps', 'api', 'public', 'uploads');
+    }
+  }
+  return uploadsPath;
+}
 
 @Controller('settings')
 export class SettingsController {
@@ -34,7 +51,8 @@ export class SettingsController {
   @Patch('logo')
   @UseGuards(AuthGuard('jwt'))
   async updateLogo(@Body('logoUrl') logoUrl: string, @Request() req: any) {
-    return this.settingsService.updateLogo(logoUrl, req.user);
+    const saved = await this.settingsService.updateLogo(logoUrl, req.user);
+    return { logoUrl: saved?.value || logoUrl };
   }
 
   @Patch('logo/upload')
@@ -43,39 +61,45 @@ export class SettingsController {
     FileInterceptor('file', {
       storage: diskStorage({
         destination: (req, file, cb) => {
-          const uploadDir = path.join(process.cwd(), 'apps', 'api', 'public', 'uploads');
+          const uploadDir = getUploadsDir();
           try {
             fs.mkdirSync(uploadDir, { recursive: true });
           } catch (e) {
-            console.error('Failed to create upload directory', e);
+            console.error('Failed to create upload directory:', uploadDir, e);
           }
           cb(null, uploadDir);
         },
         filename: (req, file, cb) => {
-          const name = `${Date.now()}-${Math.round(Math.random() * 1e9)}${extname(file.originalname)}`;
+          const name = `logo-${Date.now()}${extname(file.originalname)}`;
           cb(null, name);
         },
       }),
+      fileFilter: (req, file, cb) => {
+        if (!file.mimetype.startsWith('image/')) {
+          return cb(new Error('Chỉ cho phép upload file ảnh'), false);
+        }
+        cb(null, true);
+      },
+      limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
     }),
   )
-  async uploadLogo(@UploadedFile() file: Express.Multer.File, @Request() req: any) {
-    console.log('[SettingsController] uploadLogo', {
-      user: req.user ? { id: req.user.id, role: req.user.role } : null,
-      file: file ? { originalname: file.originalname, mimetype: file.mimetype, size: file.size } : null,
-    });
-
+  async uploadLogo(
+    @UploadedFile() file: Express.Multer.File,
+    @Request() req: any,
+  ) {
     if (!file) {
-      console.log('[SettingsController] uploadLogo no file');
       throw new NotFoundException('No file uploaded');
     }
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || `http://localhost:${process.env.PORT ?? 3001}`;
+    const baseUrl =
+      process.env.NEXT_PUBLIC_API_URL ||
+      `http://localhost:${process.env.PORT ?? 3000}`;
     const logoUrl = `${baseUrl.replace(/\/$/, '')}/uploads/${file.filename}`;
-    try {
-      return await this.settingsService.updateLogo(logoUrl, req.user);
-    } catch (error) {
-      console.error('[SettingsController] uploadLogo failed', error);
-      throw error;
-    }
+    console.log(
+      `[Settings] Uploading logo: ${logoUrl}, filename: ${file.filename}`,
+    );
+    const saved = await this.settingsService.updateLogo(logoUrl, req.user);
+    console.log(`[Settings] Logo saved to DB: ${saved?.value}`);
+    return { logoUrl: saved?.value || logoUrl };
   }
 
   @Delete('logo')

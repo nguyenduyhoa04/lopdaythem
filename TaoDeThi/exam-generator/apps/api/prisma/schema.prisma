@@ -203,14 +203,16 @@ model Topic {
 }
 
 model Lesson {
-  id          String   @id @default(uuid())
-  subjectId   String
-  gradeId     String
-  topicId     String?
-  name        String
-  orderNo     Int
-  description String?
-  createdAt   DateTime @default(now())
+  id           String   @id @default(uuid())
+  subjectId    String
+  gradeId      String
+  topicId      String?
+  name         String
+  orderNo      Int
+  description  String?
+  resourceUrl  String?
+  resourceName String?
+  createdAt    DateTime @default(now())
 
   subject     Subject      @relation(fields: [subjectId], references: [id])
   grade       Grade        @relation(fields: [gradeId], references: [id])

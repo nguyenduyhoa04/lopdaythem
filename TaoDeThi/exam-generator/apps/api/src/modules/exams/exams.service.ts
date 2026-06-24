@@ -1,7 +1,13 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PreviewExamDto } from './dto/preview-exam.dto';
 import { CreateExamDto } from './dto/create-exam.dto';
+import { UpdateExamDto } from './dto/update-exam.dto';
 import { ExamPdfService } from './exam-pdf.service';
 
 @Injectable()
@@ -266,5 +272,158 @@ export class ExamsService {
     });
 
     return result;
+  }
+
+  async getAllExams(filters?: {
+    teacherId?: string;
+    subjectId?: string;
+    gradeId?: string;
+    skip?: number;
+    take?: number;
+  }) {
+    const skip = filters?.skip || 0;
+    const take = filters?.take || 10;
+    const where: any = {};
+
+    if (filters?.teacherId) where.teacherId = filters.teacherId;
+    if (filters?.subjectId) where.subjectId = filters.subjectId;
+    if (filters?.gradeId) where.gradeId = filters.gradeId;
+
+    const [data, total] = await Promise.all([
+      this.prisma.exam.findMany({
+        where,
+        include: {
+          subject: true,
+          grade: true,
+          teacher: { select: { id: true, name: true, email: true } },
+          examQuestions: true,
+        },
+        skip,
+        take,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.exam.count({ where }),
+    ]);
+
+    return { data, total, skip, take };
+  }
+
+  async getExamById(examId: string) {
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      include: {
+        subject: true,
+        grade: true,
+        teacher: { select: { id: true, name: true, email: true } },
+        examQuestions: {
+          include: {
+            question: {
+              include: { options: true },
+            },
+          },
+        },
+        examLessons: {
+          include: { lesson: true },
+        },
+        examCodes: true,
+      },
+    });
+
+    if (!exam) throw new NotFoundException('Đề thi không tồn tại');
+    return exam;
+  }
+
+  async updateExam(examId: string, userId: string, dto: UpdateExamDto) {
+    const exam = await this.getExamById(examId);
+
+    // Check ownership - only teacher who created exam can update
+    if (exam.teacherId !== userId) {
+      throw new ForbiddenException(
+        'Chỉ giáo viên tạo đề thi mới có thể chỉnh sửa',
+      );
+    }
+
+    // If question IDs provided, validate and update
+    let examQuestionsUpdate: any = undefined;
+    if (dto.questionIds && dto.questionIds.length > 0) {
+      const questions = await this.prisma.question.findMany({
+        where: { id: { in: dto.questionIds } },
+      });
+      if (questions.length !== dto.questionIds.length) {
+        throw new BadRequestException('Một số câu hỏi không tồn tại');
+      }
+
+      // Delete old exam questions
+      await this.prisma.examQuestion.deleteMany({
+        where: { examId },
+      });
+
+      // Create new exam questions
+      examQuestionsUpdate = {
+        create: dto.questionIds.map((qid, index) => ({
+          questionId: qid,
+          orderNo: index + 1,
+        })),
+      };
+    }
+
+    // If lesson IDs provided, update
+    let examLessonsUpdate: any = undefined;
+    if (dto.lessonIds && dto.scopeType === 'LESSON') {
+      await this.prisma.examLesson.deleteMany({
+        where: { examId },
+      });
+      examLessonsUpdate = {
+        create: dto.lessonIds.map((lessonId) => ({ lessonId })),
+      };
+    }
+
+    const updated = await this.prisma.exam.update({
+      where: { id: examId },
+      data: {
+        title: dto.title,
+        subjectId: dto.subjectId,
+        gradeId: dto.gradeId,
+        examCategory: dto.category,
+        examFormat: dto.format,
+        totalScore: dto.totalScore,
+        durationMinutes: dto.durationMinutes,
+        scopeType: dto.scopeType,
+        examPeriod: dto.examPeriod,
+        ...(examQuestionsUpdate && { examQuestions: examQuestionsUpdate }),
+        ...(examLessonsUpdate && { examLessons: examLessonsUpdate }),
+      },
+      include: {
+        subject: true,
+        grade: true,
+        examQuestions: { include: { question: true } },
+      },
+    });
+
+    return updated;
+  }
+
+  async deleteExam(examId: string, userId: string) {
+    const exam = await this.getExamById(examId);
+
+    // Check ownership
+    if (exam.teacherId !== userId) {
+      throw new ForbiddenException('Chỉ giáo viên tạo đề thi mới có thể xóa');
+    }
+
+    // Delete related data
+    await this.prisma.examQuestion.deleteMany({ where: { examId } });
+    await this.prisma.examLesson.deleteMany({ where: { examId } });
+    await this.prisma.examCode.deleteMany({ where: { examId } });
+    await this.prisma.examResult.deleteMany({
+      where: { examCode: { examId } },
+    });
+
+    // Delete exam
+    const deleted = await this.prisma.exam.delete({
+      where: { id: examId },
+    });
+
+    return { message: 'Đề thi đã được xóa', id: deleted.id };
   }
 }

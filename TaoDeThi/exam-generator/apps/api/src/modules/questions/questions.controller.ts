@@ -53,9 +53,7 @@ export class QuestionsController {
    */
   @Post('extract-from-file')
   @UseInterceptors(FileInterceptor('file'))
-  async extractFromFile(
-    @UploadedFile() file: Express.Multer.File,
-  ) {
+  async extractFromFile(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
       throw new BadRequestException('No file provided');
     }
@@ -94,10 +92,7 @@ export class QuestionsController {
    * POST /questions/save-extracted
    */
   @Post('save-extracted')
-  async saveExtracted(
-    @Body() saveDto: SaveQuestionsDto,
-    @Req() req: any,
-  ) {
+  async saveExtracted(@Body() saveDto: SaveQuestionsDto, @Req() req: any) {
     const userId = req.user.sub || req.user.id;
     const data = await this.questionsService.saveExtractedQuestions(
       saveDto,
@@ -105,7 +100,6 @@ export class QuestionsController {
     );
     return { success: true, data };
   }
-
 
   @Post('batch')
   async createBatch(@Body() batchDto: any, @Req() req: any) {

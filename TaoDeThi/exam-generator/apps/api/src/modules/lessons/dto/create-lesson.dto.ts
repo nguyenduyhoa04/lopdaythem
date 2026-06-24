@@ -1,4 +1,11 @@
-import { IsString, IsNotEmpty, IsOptional, IsInt, Min } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsInt,
+  Min,
+  IsUrl,
+} from 'class-validator';
 
 export class CreateLessonDto {
   @IsString()
@@ -24,4 +31,12 @@ export class CreateLessonDto {
   @IsString()
   @IsOptional()
   description?: string;
+
+  @IsUrl()
+  @IsOptional()
+  resourceUrl?: string;
+
+  @IsString()
+  @IsOptional()
+  resourceName?: string;
 }
